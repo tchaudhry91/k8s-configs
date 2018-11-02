@@ -1,0 +1,155 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: drone-data
+spec:
+  capacity:
+    storage: 5Gi
+  volumeMode: Filesystem
+  accessModes:
+  - ReadWriteOnce
+  persistentVolumeReclaimPolicy: Delete
+  storageClassName: local-storage
+  local:
+    path: /media/EXT1/drone-data
+  nodeAffinity:
+    required:
+      nodeSelectorTerms:
+      - matchExpressions:
+        - key: kubernetes.io/hostname
+          operator: In
+          values:
+          - qedaddy
+
+---
+
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: drone-data-claim
+spec:
+  storageClassName: local-storage
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+# Deployment for server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: drone-server-deployment
+  labels:
+    app: drone-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: drone-server
+  template:
+    metadata:
+      labels:
+        app: drone-server
+    spec:
+      volumes:
+      - name: drone-data
+        persistentVolumeClaim:
+          claimName: drone-data-claim
+      containers:
+      - name: drone
+        image: drone/drone:0.8
+        env:
+        - name: DRONE_HOST
+          value: "https://drone.tux-sudo.com"
+        - name: DRONE_OPEN
+          value: "false"
+        - name: DRONE_ADMIN
+          value: "tchaudhry91"
+        - name: DRONE_GITHUB
+          value: "true"
+        - name: DRONE_GITHUB_CLIENT
+          valueFrom:
+            secretKeyRef:
+              name: github-client
+              key: github_client_id
+        - name: DRONE_GITHUB_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: github-client
+              key: github_client_secret
+        - name: DRONE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: drone
+              key: drone_secret
+        resources:
+          limits:
+            memory: "500Mi"
+        volumeMounts:
+        - name: drone-data
+          mountPath: /var/lib/drone
+        ports:
+        - containerPort: 9000
+        - containerPort: 8000
+
+---
+# Deployment for agent
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  name: drone-agent-deployment
+  labels:
+    app: drone-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: drone-agent
+  template:
+    metadata:
+      labels:
+        app: drone-agent
+    spec:
+      volumes:
+      - name: dockersock
+        hostPath:
+          path: /var/run/docker.sock
+          type: Socket
+      containers:
+      - name: drone
+        image: drone/agent:0.8
+        env:
+        - name: DRONE_SERVER
+          value: "drone-server:9000"
+        - name: DRONE_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: drone
+              key: drone_secret
+        resources:
+          limits:
+            memory: "500Mi"
+        volumeMounts:
+        - name: dockersock
+          mountPath: /var/run/docker.sock
+
+---
+kind: Service
+apiVersion: v1
+metadata:
+  name: drone-server
+spec:
+  selector:
+    app: drone-server
+  ports:
+  - protocol: TCP
+    name: http-drone
+    port: 8000
+    targetPort: 8000
+    nodePort: 30729
+  - protocol: TCP
+    port: 9000
+    name: drone
+    targetPort: 9000
+  type: NodePort

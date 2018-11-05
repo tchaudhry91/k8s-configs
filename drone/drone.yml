@@ -11,7 +11,7 @@ spec:
   persistentVolumeReclaimPolicy: Delete
   storageClassName: local-storage
   local:
-    path: /media/EXT1/drone-data
+    path: /media/local/drone-data
   nodeAffinity:
     required:
       nodeSelectorTerms:
